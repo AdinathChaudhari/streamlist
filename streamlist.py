@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 
 """
-YouTube Playlist Maker
-----------------------
-Downloads YouTube audio as M4A tracks, embeds album art and metadata,
-and generates an .m3u playlist file.
+streamlist
+----------
+Downloads YouTube / YouTube Music playlists as M4A tracks with embedded
+album art, metadata tags, and a .m3u playlist file.
+
+Features:
+  - Resume & sync: skips already-downloaded tracks on re-runs
+  - Per-playlist JSON cache for instant skipping with zero network calls
+  - Auto-retry: failed tracks are not cached and retried next run
+  - Cache rebuild from existing files when no cache is present
+  - YouTube Premium & private playlist support via browser cookies
+  - Smart AAC encoder detection (Apple hardware → FDK → native fallback)
 
 Inputs:
-  - YouTube playlist URL
+  - YouTube / YouTube Music playlist URL (or single video)
   - Excel file with columns: url (required), title (optional), artist (optional)
 """
 

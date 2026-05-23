@@ -13,6 +13,10 @@ Works with YouTube, YouTube Music, private playlists, and YouTube Premium conten
 - Embeds the video thumbnail as album art
 - Writes ID3-style tags: title, artist, album, track number
 - Generates a `.m3u` playlist file so any music player can load the full collection
+- **Resume & sync** — skips tracks already downloaded; re-running only fetches what's missing
+- **Per-playlist cache** — instant re-run skipping with zero network calls for cached tracks
+- **Auto-retry** — failed tracks are never cached, so the next run retries them automatically
+- **Cache rebuild** — if a folder has existing files but no cache (older download), the cache is rebuilt from filenames before proceeding
 
 **Output structure:**
 ```
@@ -21,6 +25,7 @@ My Playlist/
   02 - Track Two.m4a
   03 - Track Three.m4a
   My Playlist.m3u
+  streamlist_cache.json
 ```
 
 ---
@@ -105,6 +110,52 @@ A `sample_playlist.xlsx` template is included in this repo.
 
 ---
 
+## Resume, sync & caching
+
+streamlist is designed to be run repeatedly against the same playlist without re-downloading anything.
+
+### How it works
+
+After each successful download, the track's metadata is written to `streamlist_cache.json` inside the playlist folder:
+
+```json
+{
+  "https://music.youtube.com/watch?v=abc123": {
+    "title": "Get Lucky",
+    "artist": "Daft Punk",
+    "filename": "01 - Get Lucky.m4a",
+    "duration": 248
+  }
+}
+```
+
+On re-runs:
+- **Cache hit** → track is skipped instantly with zero network calls
+- **Cache miss** → track is fetched and downloaded as normal
+- **Failed tracks** → never written to cache, so the next run retries them automatically
+
+### Adding new songs to a playlist
+
+Just re-run the same command. Existing tracks are skipped; only new ones are downloaded. The `.m3u` is always rewritten to reflect the full current playlist.
+
+### Older downloads (no cache file)
+
+If a playlist folder already has `.m4a` files but no `streamlist_cache.json` (e.g. downloaded with an older version of streamlist), the cache is automatically rebuilt from the existing filenames before proceeding:
+
+```
+🔄 No cache found but 28 existing file(s) detected — rebuilding cache from filenames...
+   ✅ Rebuilt cache for 28 track(s).
+```
+
+### Summary line
+
+At the end of every run:
+```
+🎉 Done!  3 downloaded  |  28 skipped  |  1 failed
+```
+
+---
+
 ## YouTube Premium & private playlists
 
 streamlist supports Premium-only and private/unlisted playlists by reading cookies directly from your browser session.
@@ -118,17 +169,22 @@ streamlist supports Premium-only and private/unlisted playlists by reading cooki
 
 > macOS needs Full Disk Access to let yt-dlp read the browser's cookie database.
 
+**Windows:** Use `chrome` or `firefox` — Safari is not available on Windows.
+
 ---
 
 ## How it works
 
 1. **Encoder detection** — tests `aac_at` (Apple hardware) → `libfdk_aac` → `aac` (FFmpeg native) and uses the best available
-2. **Input parsing** — fetches playlist metadata via yt-dlp (no download yet) or reads your Excel file
-3. **Per-track pipeline** (inside a temp folder that auto-cleans):
+2. **Cache check** — loads `streamlist_cache.json`; rebuilds it from existing files if missing
+3. **Input parsing** — fetches playlist metadata via yt-dlp (no download yet) or reads your Excel file
+4. **Per-track pipeline** (inside a temp folder that auto-cleans):
+   - Skips instantly if URL is in cache and file exists
    - Downloads best audio stream (opus/AAC/webm, whatever YouTube offers)
    - Downloads thumbnail → converts to JPG
    - Re-encodes to M4A with embedded art and tags
-4. **M3U generation** — writes a portable playlist file with relative paths
+   - Writes entry to cache immediately after success
+5. **M3U generation** — rewrites the portable playlist file with relative paths
 
 ---
 

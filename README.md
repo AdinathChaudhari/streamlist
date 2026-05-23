@@ -1,0 +1,147 @@
+# streamlist
+
+Download any YouTube playlist or custom song list as high-quality M4A tracks — with embedded album art, metadata tags, and a ready-to-play `.m3u` playlist file.
+
+Works with YouTube, YouTube Music, private playlists, and YouTube Premium content.
+
+---
+
+## What it does
+
+- Downloads the best available audio stream for each track
+- Re-encodes to M4A (AAC 256k) using the best encoder available on your machine
+- Embeds the video thumbnail as album art
+- Writes ID3-style tags: title, artist, album, track number
+- Generates a `.m3u` playlist file so any music player can load the full collection
+
+**Output structure:**
+```
+My Playlist/
+  01 - Track One.m4a
+  02 - Track Two.m4a
+  03 - Track Three.m4a
+  My Playlist.m3u
+```
+
+---
+
+## Requirements
+
+**Python 3.8+**
+
+Install dependencies:
+```bash
+pip install yt-dlp openpyxl tqdm
+```
+
+**FFmpeg** (required for encoding):
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu / Debian
+sudo apt install ffmpeg
+
+# Windows
+# Download from https://ffmpeg.org/download.html
+```
+
+---
+
+## Usage
+
+### Interactive mode (recommended for first use)
+```bash
+python streamlist.py
+```
+
+The script will ask:
+1. Which browser to use for cookies (needed for Premium / private playlists)
+2. Whether to use a YouTube URL or Excel file
+3. The playlist name
+
+### YouTube playlist URL
+```bash
+python streamlist.py --url "https://music.youtube.com/playlist?list=..."
+```
+
+### Excel file
+```bash
+python streamlist.py --excel my_songs.xlsx --name "My Playlist"
+```
+
+### All flags
+```bash
+python streamlist.py \
+  --url "https://youtube.com/playlist?list=..." \
+  --name "Summer Mix" \
+  --out ~/Music \
+  --browser safari \
+  --no-notification
+```
+
+| Flag | Description |
+|------|-------------|
+| `--url` | YouTube or YouTube Music playlist / video URL |
+| `--excel` | Path to `.xlsx` file with track list |
+| `--name` | Override the playlist / output folder name |
+| `--out` | Output directory (default: current directory) |
+| `--browser` | Browser to read cookies from: `safari`, `chrome`, `firefox`, `edge`, `brave`, `opera` |
+| `--no-notification` | Disable the completion sound |
+
+---
+
+## Excel format
+
+Create a `.xlsx` file with these columns. Only `url` is required.
+
+| url | title | artist |
+|-----|-------|--------|
+| https://youtube.com/watch?v=... | Get Lucky | Daft Punk |
+| https://music.youtube.com/watch?v=... | Blinding Lights | The Weeknd |
+| https://youtube.com/watch?v=... | | *(fetched from YouTube if blank)* |
+
+A `sample_playlist.xlsx` template is included in this repo.
+
+---
+
+## YouTube Premium & private playlists
+
+streamlist supports Premium-only and private/unlisted playlists by reading cookies directly from your browser session.
+
+**Setup for macOS (Safari / Chrome):**
+
+1. Make sure you're logged into YouTube in your browser
+2. Go to **System Settings → Privacy & Security → Full Disk Access**
+3. Add **Terminal** (or VS Code if running from there)
+4. Run the script and choose your browser when prompted
+
+> macOS needs Full Disk Access to let yt-dlp read the browser's cookie database.
+
+---
+
+## How it works
+
+1. **Encoder detection** — tests `aac_at` (Apple hardware) → `libfdk_aac` → `aac` (FFmpeg native) and uses the best available
+2. **Input parsing** — fetches playlist metadata via yt-dlp (no download yet) or reads your Excel file
+3. **Per-track pipeline** (inside a temp folder that auto-cleans):
+   - Downloads best audio stream (opus/AAC/webm, whatever YouTube offers)
+   - Downloads thumbnail → converts to JPG
+   - Re-encodes to M4A with embedded art and tags
+4. **M3U generation** — writes a portable playlist file with relative paths
+
+---
+
+## Supported platforms
+
+| Platform | Status |
+|----------|--------|
+| macOS | ✅ Full support (hardware encoder on Apple Silicon / Intel) |
+| Linux | ✅ Full support |
+| Windows | ✅ Works (use `chrome` or `firefox` for cookies; Safari not available) |
+
+---
+
+## License
+
+MIT

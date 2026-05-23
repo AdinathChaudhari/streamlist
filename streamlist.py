@@ -1,0 +1,540 @@
+#!/usr/bin/env python3
+
+"""
+YouTube Playlist Maker
+----------------------
+Downloads YouTube audio as M4A tracks, embeds album art and metadata,
+and generates an .m3u playlist file.
+
+Inputs:
+  - YouTube playlist URL
+  - Excel file with columns: url (required), title (optional), artist (optional)
+"""
+
+import os
+import sys
+import re
+import shutil
+import subprocess
+import time
+import tempfile
+import argparse
+from pathlib import Path
+
+import yt_dlp
+from tqdm import tqdm
+
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
+# ─────────────────────────────────────────────
+#  FFMPEG DETECTION
+# ─────────────────────────────────────────────
+
+def detect_ffmpeg():
+    for candidate in [shutil.which('ffmpeg'), "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    raise RuntimeError(
+        "FFmpeg not found. Install it:\n"
+        "  macOS:  brew install ffmpeg\n"
+        "  Linux:  sudo apt install ffmpeg\n"
+        "  Windows: https://ffmpeg.org/download.html"
+    )
+
+def detect_ffprobe(ffmpeg_path):
+    probe = shutil.which('ffprobe') or ffmpeg_path.replace('ffmpeg', 'ffprobe')
+    return probe if os.path.exists(probe) else ffmpeg_path.replace('ffmpeg', 'ffprobe')
+
+FFMPEG  = detect_ffmpeg()
+FFPROBE = detect_ffprobe(FFMPEG)
+
+# ─────────────────────────────────────────────
+#  ENCODER DETECTION
+# ─────────────────────────────────────────────
+
+def detect_best_aac_encoder():
+    candidates = [
+        ('aac_at',     True,  'Apple AudioToolbox (hardware, macOS)'),
+        ('libfdk_aac', False, 'Fraunhofer FDK AAC (best software quality)'),
+        ('aac',        False, 'FFmpeg native AAC (fallback)'),
+    ]
+    try:
+        result = subprocess.run(
+            [FFMPEG, '-hide_banner', '-encoders'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
+        )
+        available = result.stdout
+    except Exception:
+        return ('aac', False, 'FFmpeg native AAC')
+
+    for encoder, is_hw, desc in candidates:
+        if encoder not in available:
+            continue
+        try:
+            val = subprocess.run(
+                [FFMPEG, '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono',
+                 '-t', '0.1', '-c:a', encoder, '-b:a', '128k', '-f', 'null', '-'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5
+            )
+            if val.returncode == 0:
+                return (encoder, is_hw, desc)
+        except Exception:
+            continue
+
+    return ('aac', False, 'FFmpeg native AAC')
+
+# ─────────────────────────────────────────────
+#  QUIET LOGGER
+# ─────────────────────────────────────────────
+
+class QuietLogger:
+    def debug(self, msg):   pass
+    def warning(self, msg): pass
+    def error(self, msg):   pass
+
+# ─────────────────────────────────────────────
+#  SAFE FILENAME
+# ─────────────────────────────────────────────
+
+def safe_filename(name, max_len=120):
+    name = re.sub(r'[\\/:*?"<>|]', '-', name)
+    name = name.strip('. ')
+    return name[:max_len] if len(name) > max_len else name
+
+# ─────────────────────────────────────────────
+#  YDL BASE OPTIONS (shared cookie config)
+# ─────────────────────────────────────────────
+
+# Set by main() after parsing --browser arg
+_COOKIE_BROWSER = None
+
+def ydl_base_opts():
+    """Base yt-dlp options shared across all calls — includes cookies if set."""
+    opts = {'quiet': True, 'logger': QuietLogger(), 'no_warnings': True}
+    if _COOKIE_BROWSER:
+        opts['cookiesfrombrowser'] = (_COOKIE_BROWSER,)
+    return opts
+
+# ─────────────────────────────────────────────
+#  PLAYLIST EXPANSION
+# ─────────────────────────────────────────────
+
+def expand_playlist_url(url):
+    """Return list of (title, url) from a YouTube playlist or single video URL."""
+    opts = {**ydl_base_opts(), 'extract_flat': True}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    if info.get('_type') == 'playlist':
+        entries = info.get('entries', []) or []
+        tracks = []
+        for e in entries:
+            if not e:
+                continue
+            vid_url = e.get('url') or e.get('webpage_url') or f"https://www.youtube.com/watch?v={e['id']}"
+            tracks.append({'title': e.get('title', ''), 'url': vid_url, 'artist': ''})
+        print(f"  Found {len(tracks)} track(s) in playlist: {info.get('title', url)}")
+        return info.get('title', 'Playlist'), tracks
+    else:
+        title = info.get('title', 'Track')
+        return title, [{'title': title, 'url': url, 'artist': ''}]
+
+# ─────────────────────────────────────────────
+#  EXCEL INPUT
+# ─────────────────────────────────────────────
+
+def load_excel(path):
+    """Load tracks from an Excel file. Required column: url. Optional: title, artist."""
+    if openpyxl is None:
+        raise RuntimeError("openpyxl not installed. Run: pip install openpyxl")
+
+    wb = openpyxl.load_workbook(path)
+    ws = wb.active
+    headers = [str(c.value).strip().lower() if c.value else '' for c in next(ws.iter_rows(min_row=1, max_row=1))]
+
+    if 'url' not in headers:
+        raise ValueError("Excel file must have a 'url' column.")
+
+    url_idx    = headers.index('url')
+    title_idx  = headers.index('title')  if 'title'  in headers else None
+    artist_idx = headers.index('artist') if 'artist' in headers else None
+
+    tracks = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        url = str(row[url_idx]).strip() if row[url_idx] else ''
+        if not url or url.lower() == 'none':
+            continue
+        title  = str(row[title_idx]).strip()  if title_idx  is not None and row[title_idx]  else ''
+        artist = str(row[artist_idx]).strip() if artist_idx is not None and row[artist_idx] else ''
+        tracks.append({'title': title, 'url': url, 'artist': artist})
+
+    return tracks
+
+# ─────────────────────────────────────────────
+#  AUDIO DOWNLOAD
+# ─────────────────────────────────────────────
+
+def download_audio(url, out_path_no_ext):
+    """Download best audio stream. Returns the actual downloaded file path."""
+    downloaded = {'file': None}
+
+    def progress_hook(d):
+        if d.get('status') == 'finished':
+            downloaded['file'] = d.get('filename')
+
+    opts = {
+        **ydl_base_opts(),
+        'format': 'bestaudio/best',
+        'outtmpl': f'{out_path_no_ext}.%(ext)s',
+        'ffmpeg_location': FFMPEG,
+        'progress_hooks': [progress_hook],
+        'postprocessors': [],
+    }
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([url])
+
+    # Find the downloaded file (extension varies)
+    parent = Path(out_path_no_ext).parent
+    stem   = Path(out_path_no_ext).name
+    for f in parent.iterdir():
+        if f.stem == stem and f.suffix.lower() in {'.webm', '.opus', '.m4a', '.mp4', '.ogg', '.aac'}:
+            return f
+
+    raise RuntimeError(f"Downloaded file not found for: {url}")
+
+# ─────────────────────────────────────────────
+#  THUMBNAIL DOWNLOAD
+# ─────────────────────────────────────────────
+
+def download_thumbnail(url, out_path_no_ext):
+    """Download video thumbnail and convert to JPG. Returns path or None."""
+    opts = {
+        **ydl_base_opts(),
+        'skip_download': True,
+        'writethumbnail': True,
+        'outtmpl': f'{out_path_no_ext}.%(ext)s',
+        'ffmpeg_location': FFMPEG,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+    except Exception:
+        return None
+
+    for ext in ['jpg', 'jpeg', 'png', 'webp']:
+        src = Path(f'{out_path_no_ext}.{ext}')
+        if src.exists():
+            jpg = Path(f'{out_path_no_ext}_thumb.jpg')
+            subprocess.run(
+                [FFMPEG, '-y', '-i', str(src), str(jpg)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            src.unlink(missing_ok=True)
+            return jpg if jpg.exists() else None
+
+    return None
+
+# ─────────────────────────────────────────────
+#  GET AUDIO DURATION
+# ─────────────────────────────────────────────
+
+def get_duration_sec(file_path):
+    try:
+        out = subprocess.run(
+            [FFPROBE, '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)],
+            capture_output=True, text=True, check=True
+        ).stdout.strip()
+        return float(out)
+    except Exception:
+        return 0.0
+
+# ─────────────────────────────────────────────
+#  ENCODE TO M4A WITH METADATA + ART
+# ─────────────────────────────────────────────
+
+def encode_track(src_file, out_m4a, encoder, title, artist, album, track_num, total_tracks, cover_jpg):
+    """Encode audio to M4A with embedded metadata and album art."""
+    duration_sec = get_duration_sec(src_file)
+
+    cmd = [FFMPEG, '-y', '-i', str(src_file)]
+    inputs = 1
+
+    if cover_jpg and cover_jpg.exists():
+        cmd += ['-i', str(cover_jpg)]
+        inputs = 2
+
+    cmd += [
+        '-map', '0:a',
+        '-c:a', encoder,
+        '-b:a', '256k',
+        '-metadata', f'title={title}',
+        '-metadata', f'artist={artist}',
+        '-metadata', f'album={album}',
+        '-metadata', f'track={track_num}/{total_tracks}',
+        '-metadata', f'genre=Music',
+    ]
+
+    if inputs == 2:
+        cmd += [
+            '-map', '1:v',
+            '-c:v', 'mjpeg',
+            '-disposition:v:0', 'attached_pic',
+        ]
+
+    cmd += ['-movflags', '+faststart', str(out_m4a)]
+
+    pbar = tqdm(total=int(duration_sec) or 1, unit='s', desc=f"  Encoding", ncols=68, leave=False)
+    proc = subprocess.Popen(
+        cmd + ['-progress', 'pipe:1', '-nostats'],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    last_sec = 0
+    for line in proc.stdout:
+        if 'out_time_ms=' in line:
+            try:
+                ms  = int(line.split('=')[1].strip())
+                cur = min(ms // 1000, int(duration_sec))
+                pbar.update(cur - last_sec)
+                last_sec = cur
+            except ValueError:
+                pass
+    proc.wait()
+    pbar.close()
+
+    if proc.returncode != 0:
+        # Fallback to native aac
+        fallback_cmd = [c if c != encoder else 'aac' for c in cmd]
+        subprocess.run(fallback_cmd, check=True, capture_output=True)
+
+# ─────────────────────────────────────────────
+#  M3U WRITER
+# ─────────────────────────────────────────────
+
+def write_m3u(playlist_path, tracks_info):
+    """Write an .m3u playlist file. tracks_info = list of (filename, duration_sec, display_name)"""
+    with open(playlist_path, 'w', encoding='utf-8') as f:
+        f.write('#EXTM3U\n')
+        for filename, duration_sec, display_name in tracks_info:
+            f.write(f'#EXTINF:{int(duration_sec)},{display_name}\n')
+            f.write(f'{filename}\n')
+
+# ─────────────────────────────────────────────
+#  NOTIFICATION
+# ─────────────────────────────────────────────
+
+def play_notification():
+    print('\a')
+    sys.stdout.flush()
+    try:
+        if sys.platform == 'darwin':
+            subprocess.run(['say', 'Playlist ready'], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="YouTube Playlist Maker — downloads tracks as M4A with art + .m3u")
+    parser.add_argument('--url',   help='YouTube playlist or video URL')
+    parser.add_argument('--excel', help='Path to Excel file (.xlsx) with url/title/artist columns')
+    parser.add_argument('--name',  help='Playlist / album name')
+    parser.add_argument('--out',     help='Output directory (default: current directory)')
+    parser.add_argument('--browser', help='Browser to load cookies from (for YouTube Premium/private playlists)',
+                        choices=['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera'])
+    parser.add_argument('--no-notification', action='store_true')
+    args = parser.parse_args()
+
+    print("╔══════════════════════════════════════════════════╗")
+    print("║   🎵  YouTube Playlist Maker  v1                 ║")
+    print("╚══════════════════════════════════════════════════╝")
+
+    # ── Browser / cookie setup ────────────────────────────────────────────────
+    global _COOKIE_BROWSER
+    BROWSERS = ['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera']
+
+    if args.browser:
+        _COOKIE_BROWSER = args.browser
+    else:
+        print("\n🔐 Use browser cookies? (needed for Premium / private playlists)")
+        print("   1 — Safari")
+        print("   2 — Chrome")
+        print("   3 — Firefox")
+        print("   4 — Edge")
+        print("   5 — Brave")
+        print("   6 — Opera")
+        print("   0 — No (public videos only)")
+        choice = input("Choice [0-6]: ").strip()
+        if choice in [str(i+1) for i in range(len(BROWSERS))]:
+            _COOKIE_BROWSER = BROWSERS[int(choice) - 1]
+        else:
+            _COOKIE_BROWSER = None
+
+    if _COOKIE_BROWSER:
+        print(f"   🍪 Using cookies from: {_COOKIE_BROWSER.capitalize()}")
+    else:
+        print("   ⚠️  No cookies — only public videos will work")
+
+    # ── Encoder ──────────────────────────────────────────────────────────────
+    print("\n🔍 Detecting AAC encoder...")
+    encoder, is_hw, enc_desc = detect_best_aac_encoder()
+    print(f"   {'⚡ Hardware' if is_hw else '🖥️  Software'} → {enc_desc}")
+
+    # ── Input mode ───────────────────────────────────────────────────────────
+    playlist_name = None
+    tracks = []
+
+    if args.excel:
+        source_path = args.excel
+        print(f"\n📄 Loading tracks from Excel: {source_path}")
+        tracks = load_excel(source_path)
+        print(f"   {len(tracks)} track(s) found")
+        playlist_name = args.name or Path(source_path).stem
+
+    elif args.url:
+        print(f"\n📋 Fetching playlist info...")
+        playlist_name, tracks = expand_playlist_url(args.url)
+        if args.name:
+            playlist_name = args.name
+
+    else:
+        # Interactive mode
+        print("\nHow do you want to provide your tracks?")
+        print("  1 — YouTube playlist URL")
+        print("  2 — Excel file (.xlsx)")
+        choice = input("Choice [1/2]: ").strip()
+
+        if choice == '1':
+            url = input("YouTube playlist URL: ").strip()
+            print("📋 Fetching playlist info...")
+            playlist_name, tracks = expand_playlist_url(url)
+        elif choice == '2':
+            path = input("Excel file path: ").strip().strip('"')
+            if not os.path.isfile(path):
+                print(f"❌ File not found: {path}")
+                sys.exit(1)
+            tracks = load_excel(path)
+            print(f"   {len(tracks)} track(s) found")
+            playlist_name = Path(path).stem
+        else:
+            print("❌ Invalid choice.")
+            sys.exit(1)
+
+        if args.name:
+            playlist_name = args.name
+        else:
+            override = input(f"\nPlaylist name [{playlist_name}]: ").strip()
+            if override:
+                playlist_name = override
+
+    if not tracks:
+        print("❌ No tracks to download.")
+        sys.exit(1)
+
+    playlist_name = safe_filename(playlist_name)
+
+    # ── Output folder ─────────────────────────────────────────────────────────
+    base_out = Path(args.out) if args.out else Path(os.getcwd())
+    out_dir  = base_out / playlist_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\n📁 Output folder: {out_dir}")
+
+    # ── Download + encode each track ──────────────────────────────────────────
+    total      = len(tracks)
+    m3u_data   = []
+    succeeded  = 0
+    total_start = time.time()
+
+    for idx, track in enumerate(tracks, 1):
+        url    = track['url']
+        artist = track.get('artist', '')
+        track_num_str = f"{idx:02d}"
+
+        print(f"\n{'─'*52}")
+        print(f"  [{idx}/{total}] Fetching info...")
+
+        # Resolve title and/or artist if either is missing
+        if not track.get('title') or not artist:
+            try:
+                with yt_dlp.YoutubeDL(ydl_base_opts()) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                if not track.get('title'):
+                    track['title'] = info.get('title', f'Track {idx}')
+                if not artist:
+                    # 'artist' is populated by yt-dlp for YouTube Music links;
+                    # fall back to uploader/channel for regular YouTube
+                    artist = (info.get('artist') or info.get('uploader')
+                              or info.get('channel', ''))
+            except Exception:
+                track['title'] = f'Track {idx}'
+
+        title    = track['title']
+        filename = f"{track_num_str} - {safe_filename(title)}.m4a"
+        out_m4a  = out_dir / filename
+
+        print(f"  🎵 {title}")
+        if artist:
+            print(f"     Artist: {artist}")
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+
+                # Download audio
+                print(f"  ⬇️  Downloading audio...")
+                raw_audio = download_audio(url, str(tmp_path / 'audio'))
+
+                # Download thumbnail
+                print(f"  🖼️  Downloading thumbnail...")
+                cover = download_thumbnail(url, str(tmp_path / 'thumb'))
+
+                # Encode
+                encode_track(
+                    src_file=raw_audio,
+                    out_m4a=out_m4a,
+                    encoder=encoder,
+                    title=title,
+                    artist=artist,
+                    album=playlist_name,
+                    track_num=idx,
+                    total_tracks=total,
+                    cover_jpg=cover,
+                )
+
+            size_mb  = out_m4a.stat().st_size / (1024 * 1024)
+            duration = get_duration_sec(out_m4a)
+            display  = f"{artist} - {title}" if artist else title
+            m3u_data.append((filename, duration, display))
+            succeeded += 1
+            print(f"  ✅ Saved: {filename}  ({size_mb:.1f} MB)")
+
+        except Exception as e:
+            print(f"  ❌ Failed: {e}")
+
+    # ── Write .m3u ────────────────────────────────────────────────────────────
+    if m3u_data:
+        m3u_path = out_dir / f"{playlist_name}.m3u"
+        write_m3u(m3u_path, m3u_data)
+        print(f"\n📋 Playlist file: {m3u_path.name}")
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    elapsed = time.time() - total_start
+    print(f"\n{'═'*52}")
+    print(f"🎉 Done!  {succeeded}/{total} track(s) downloaded")
+    print(f"⏱️  Total time: {int(elapsed//60)}m {elapsed%60:.1f}s")
+    print(f"📁 {out_dir}")
+    print(f"{'═'*52}")
+
+    if not args.no_notification:
+        play_notification()
+
+
+if __name__ == '__main__':
+    main()

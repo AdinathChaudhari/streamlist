@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.m4a
+*.mp3
+*.mp4
+*.webm
+*.opus
+*.m3u
+.DS_Store

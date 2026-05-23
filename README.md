@@ -156,6 +156,40 @@ At the end of every run:
 
 ---
 
+## Known limitations
+
+### Music Premium exclusive tracks
+
+Some tracks in YouTube Music playlists have a separate video ID that YouTube blocks from all third-party downloaders — even with valid login cookies and a Premium subscription. These are recordings that YouTube Music licenses exclusively and deliberately restricts at the API level. yt-dlp receives a hard "Video unavailable" response with no workaround.
+
+**How to identify them:** the error will be:
+```
+❌ Failed: ERROR: [youtube] <video_id>: Video unavailable. This video is not available
+```
+even after the cookie retry attempt.
+
+**Workarounds:**
+- Search for the same song on regular YouTube — a different, downloadable upload almost always exists. Add that URL to your Excel file instead.
+- Add the file manually (from another source) and add a dummy entry to `streamlist_cache.json` so streamlist stops retrying it:
+  ```json
+  "https://music.youtube.com/watch?v=<video_id>": {
+    "title": "Song Name",
+    "artist": "Artist Name",
+    "filename": "22 - Song Name.m4a",
+    "duration": 0
+  }
+  ```
+
+### Age-restricted videos
+
+Videos with a YouTube age restriction may fail even with cookies if the account has not verified its age in the browser session.
+
+### Geo-blocked content
+
+Videos restricted to specific countries will fail if your IP address is outside the allowed region. A VPN set to the appropriate country before running the script is the only workaround.
+
+---
+
 ## YouTube Premium & private playlists
 
 streamlist supports Premium-only and private/unlisted playlists by reading cookies directly from your browser session.

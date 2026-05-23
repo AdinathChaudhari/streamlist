@@ -111,11 +111,12 @@ def safe_filename(name, max_len=120):
 # Set by main() after parsing --browser arg
 _COOKIE_BROWSER = None
 
-def ydl_base_opts():
+def ydl_base_opts(with_cookies=True):
     """Base yt-dlp options shared across all calls — includes cookies if set."""
     opts = {'quiet': True, 'logger': QuietLogger(), 'no_warnings': True}
-    if _COOKIE_BROWSER:
-        opts['cookiesfrombrowser'] = (_COOKIE_BROWSER,)
+    if _COOKIE_BROWSER and with_cookies:
+        # Full tuple: (browser, profile, keyring, container)
+        opts['cookiesfrombrowser'] = (_COOKIE_BROWSER, None, None, None)
     return opts
 
 # ─────────────────────────────────────────────
@@ -177,25 +178,32 @@ def load_excel(path):
 #  AUDIO DOWNLOAD
 # ─────────────────────────────────────────────
 
-def download_audio(url, out_path_no_ext):
+def download_audio(url, out_path_no_ext, with_cookies=True):
     """Download best audio stream. Returns the actual downloaded file path."""
-    downloaded = {'file': None}
-
     def progress_hook(d):
-        if d.get('status') == 'finished':
-            downloaded['file'] = d.get('filename')
+        pass  # status tracking not needed here
 
-    opts = {
-        **ydl_base_opts(),
-        'format': 'bestaudio/best',
-        'outtmpl': f'{out_path_no_ext}.%(ext)s',
-        'ffmpeg_location': FFMPEG,
-        'progress_hooks': [progress_hook],
-        'postprocessors': [],
-    }
+    def _attempt(use_cookies):
+        opts = {
+            **ydl_base_opts(with_cookies=use_cookies),
+            'format': 'bestaudio/best',
+            'outtmpl': f'{out_path_no_ext}.%(ext)s',
+            'ffmpeg_location': FFMPEG,
+            'progress_hooks': [progress_hook],
+            'postprocessors': [],
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+    try:
+        _attempt(use_cookies=with_cookies)
+    except Exception as e:
+        if _COOKIE_BROWSER and with_cookies:
+            # Some videos fail with cookies (region/auth quirks) — retry without
+            print(f"  ⚠️  Cookie download failed, retrying without cookies...")
+            _attempt(use_cookies=False)
+        else:
+            raise
 
     # Find the downloaded file (extension varies)
     parent = Path(out_path_no_ext).parent

@@ -320,6 +320,23 @@ def encode_track(src_file, out_m4a, encoder, title, artist, album, track_num, to
         subprocess.run(fallback_cmd, check=True, capture_output=True)
 
 # ─────────────────────────────────────────────
+#  EXISTING TRACK DETECTION
+# ─────────────────────────────────────────────
+
+def find_existing_track(out_dir: Path, title: str) -> Path | None:
+    """
+    Return a matching .m4a file in out_dir if the track was already downloaded.
+    Matches by sanitized title anywhere in the filename (ignores track number prefix).
+    """
+    needle = safe_filename(title).lower()
+    for f in out_dir.glob('*.m4a'):
+        # Strip leading "NN - " prefix before comparing
+        stem = re.sub(r'^\d+\s*-\s*', '', f.stem).lower()
+        if stem == needle:
+            return f
+    return None
+
+# ─────────────────────────────────────────────
 #  M3U WRITER
 # ─────────────────────────────────────────────
 
@@ -454,10 +471,17 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\n📁 Output folder: {out_dir}")
 
+    # ── Scan for already-downloaded tracks ───────────────────────────────────
+    existing_files = {re.sub(r'^\d+\s*-\s*', '', f.stem).lower(): f
+                      for f in out_dir.glob('*.m4a')}
+    if existing_files:
+        print(f"\n🔍 Found {len(existing_files)} existing track(s) in output folder — will skip those.")
+
     # ── Download + encode each track ──────────────────────────────────────────
-    total      = len(tracks)
-    m3u_data   = []
-    succeeded  = 0
+    total       = len(tracks)
+    m3u_data    = []
+    succeeded   = 0
+    skipped     = 0
     total_start = time.time()
 
     for idx, track in enumerate(tracks, 1):
@@ -466,10 +490,10 @@ def main():
         track_num_str = f"{idx:02d}"
 
         print(f"\n{'─'*52}")
-        print(f"  [{idx}/{total}] Fetching info...")
 
         # Resolve title and/or artist if either is missing
         if not track.get('title') or not artist:
+            print(f"  [{idx}/{total}] Fetching info...")
             try:
                 with yt_dlp.YoutubeDL(ydl_base_opts()) as ydl:
                     info = ydl.extract_info(url, download=False)
@@ -487,23 +511,34 @@ def main():
         filename = f"{track_num_str} - {safe_filename(title)}.m4a"
         out_m4a  = out_dir / filename
 
-        print(f"  🎵 {title}")
+        print(f"  [{idx}/{total}] 🎵 {title}")
         if artist:
-            print(f"     Artist: {artist}")
+            print(f"       Artist: {artist}")
 
+        # ── Skip if already downloaded ────────────────────────────────────────
+        existing = find_existing_track(out_dir, title)
+        if existing:
+            # Rename to correct track-number prefix if it changed (e.g. playlist reordered)
+            if existing != out_m4a:
+                existing.rename(out_m4a)
+            duration = get_duration_sec(out_m4a)
+            display  = f"{artist} - {title}" if artist else title
+            m3u_data.append((filename, duration, display))
+            skipped += 1
+            print(f"  ⏭️  Already downloaded — skipping")
+            continue
+
+        # ── Download + encode ─────────────────────────────────────────────────
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
 
-                # Download audio
                 print(f"  ⬇️  Downloading audio...")
                 raw_audio = download_audio(url, str(tmp_path / 'audio'))
 
-                # Download thumbnail
                 print(f"  🖼️  Downloading thumbnail...")
                 cover = download_thumbnail(url, str(tmp_path / 'thumb'))
 
-                # Encode
                 encode_track(
                     src_file=raw_audio,
                     out_m4a=out_m4a,
@@ -535,7 +570,7 @@ def main():
     # ── Summary ───────────────────────────────────────────────────────────────
     elapsed = time.time() - total_start
     print(f"\n{'═'*52}")
-    print(f"🎉 Done!  {succeeded}/{total} track(s) downloaded")
+    print(f"🎉 Done!  {succeeded} downloaded  |  {skipped} skipped  |  {total - succeeded - skipped} failed")
     print(f"⏱️  Total time: {int(elapsed//60)}m {elapsed%60:.1f}s")
     print(f"📁 {out_dir}")
     print(f"{'═'*52}")

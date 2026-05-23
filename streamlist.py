@@ -474,10 +474,37 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\n📁 Output folder: {out_dir}")
 
-    # ── Load cache ────────────────────────────────────────────────────────────
+    # ── Load cache (rebuild from existing files if missing) ───────────────────
     cache = load_cache(out_dir)
     if cache:
         print(f"\n💾 Cache loaded — {len(cache)} track(s) previously downloaded.")
+    else:
+        existing_m4a = list(out_dir.glob('*.m4a'))
+        if existing_m4a:
+            print(f"\n🔄 No cache found but {len(existing_m4a)} existing file(s) detected — rebuilding cache from filenames...")
+            # For each track in the playlist, check if a matching file exists by title
+            rebuilt = 0
+            for tidx, track in enumerate(tracks, 1):
+                if not track.get('title'):
+                    continue
+                title  = track['title']
+                artist = track.get('artist', '')
+                needle = safe_filename(title).lower()
+                for f in existing_m4a:
+                    stem = re.sub(r'^\d+\s*-\s*', '', f.stem).lower()
+                    if stem == needle:
+                        duration = get_duration_sec(f)
+                        cache[track['url']] = {
+                            'title':    title,
+                            'artist':   artist,
+                            'filename': f.name,
+                            'duration': duration,
+                        }
+                        rebuilt += 1
+                        break
+            if rebuilt:
+                save_cache(out_dir, cache)
+                print(f"   ✅ Rebuilt cache for {rebuilt} track(s).")
 
     # ── Download + encode each track ──────────────────────────────────────────
     total       = len(tracks)

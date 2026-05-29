@@ -286,8 +286,7 @@ def apply_art_style(src_jpg: Path, style: str) -> bytes:
     img = Image.open(src_jpg).convert('RGB')
     w, h = img.size
 
-    if w == h:
-        # Already square — no transform needed
+    if style == 'restore' or w == h:
         result = img
     elif style == 'center':
         result = art_center_crop(img)
@@ -742,8 +741,9 @@ def run_edit_cover_art(args):
     print("   1 — Center crop   (safe, always works)")
     print("   2 — Smart crop    (entropy-based — finds the most interesting region)")
     print("   3 — Padded blur   (original image centered on blurred background)")
-    style_choice = input("Choice [1/2/3]: ").strip()
-    style_map = {'1': 'center', '2': 'smart', '3': 'blur'}
+    print("   4 — Restore original  (re-embed raw YouTube thumbnail, no transform)")
+    style_choice = input("Choice [1/2/3/4]: ").strip()
+    style_map = {'1': 'center', '2': 'smart', '3': 'blur', '4': 'restore'}
     style = style_map.get(style_choice)
     if not style:
         print("❌ Invalid choice.")
@@ -885,7 +885,7 @@ def main():
     elif bucket == '2':
         while True:
             print("\nMake edits:")
-            print("  1 — Fix cover art       (re-download & reshape to square)")
+            print("  1 — Fix cover art       (re-download & reshape: square crop / blur / restore original)")
             print("  2 — Rename album / album artist")
             edit_choice = input("Choice [1/2]: ").strip()
 
@@ -904,7 +904,6 @@ def main():
     else:
         print("❌ Invalid choice.")
         sys.exit(1)
-
 
 if __name__ == '__main__':
     main()

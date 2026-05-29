@@ -23,10 +23,11 @@ streamlist has two modes: **Download** and **Make edits**.
 - **Cache rebuild** — if a folder has existing files but no cache (older download), the cache is rebuilt from filenames before proceeding
 
 ### Make edits
-- **Fix cover art** — re-download thumbnails for an existing playlist and re-embed as a square, without touching the audio. Three styles to choose from:
+- **Fix cover art** — re-download thumbnails for an existing playlist and re-embed, without touching the audio. Four styles to choose from:
   - **Center crop** — crops to the middle square of the image
   - **Smart crop** — entropy-based crop that finds the most visually interesting region
   - **Padded blur** — places the original image centered on a blurred, zoomed background (Spotify-style)
+  - **Restore original** — re-embeds the raw YouTube thumbnail with no transform
 - **Rename album / album artist** — rewrite the album name and album artist tags across all tracks in a folder, independently of the folder name. Audio is never touched.
 
 **Output structure:**

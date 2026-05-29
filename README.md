@@ -8,6 +8,9 @@ Works with YouTube, YouTube Music, private playlists, and YouTube Premium conten
 
 ## What it does
 
+streamlist has two modes: **Download** and **Make edits**.
+
+### Download
 - Downloads the best available audio stream for each track
 - Re-encodes to M4A (AAC 256k) using the best encoder available on your machine
 - Embeds the video thumbnail as album art at original quality (converts png/webp to JPEG only if needed)
@@ -17,6 +20,12 @@ Works with YouTube, YouTube Music, private playlists, and YouTube Premium conten
 - **Per-playlist cache** — instant re-run skipping with zero network calls for cached tracks
 - **Auto-retry** — failed tracks are never cached, so the next run retries them automatically
 - **Cache rebuild** — if a folder has existing files but no cache (older download), the cache is rebuilt from filenames before proceeding
+
+### Make edits
+- **Fix cover art** — re-download thumbnails for an existing playlist and re-embed as a square, without touching the audio. Three styles to choose from:
+  - **Center crop** — crops to the middle square of the image
+  - **Smart crop** — entropy-based crop that finds the most visually interesting region
+  - **Padded blur** — places the original image centered on a blurred, zoomed background (Spotify-style)
 
 **Output structure:**
 ```
@@ -36,7 +45,7 @@ My Playlist/
 
 Install dependencies:
 ```bash
-pip install yt-dlp openpyxl tqdm Pillow
+pip install yt-dlp openpyxl tqdm Pillow mutagen
 ```
 
 **FFmpeg** (required for encoding):
@@ -60,10 +69,11 @@ sudo apt install ffmpeg
 python streamlist.py
 ```
 
-The script will ask:
-1. Which browser to use for cookies (needed for Premium / private playlists)
-2. Whether to use a YouTube URL or Excel file
-3. The playlist name
+The script will ask which mode you want:
+- **Download** — walks you through cookies, source (URL or Excel), and playlist name
+- **Make edits** — prompts for a folder path and edit type
+
+Passing `--url` or `--excel` skips the top-level menu and goes straight to download.
 
 ### YouTube playlist URL
 ```bash
@@ -73,6 +83,18 @@ python streamlist.py --url "https://music.youtube.com/playlist?list=..."
 ### Excel file
 ```bash
 python streamlist.py --excel my_songs.xlsx --name "My Playlist"
+```
+
+### Fix cover art on an existing playlist
+```bash
+python streamlist.py
+# → Make edits → Fix cover art → enter folder path → choose crop style
+```
+
+Or point directly to the folder:
+```bash
+python streamlist.py --out "~/Music/My Playlist"
+# → Make edits → Fix cover art → choose crop style
 ```
 
 ### All flags

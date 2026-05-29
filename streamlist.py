@@ -13,12 +13,14 @@ Features:
   - Cache rebuild from existing files when no cache is present
   - YouTube Premium & private playlist support via browser cookies
   - Smart AAC encoder detection (Apple hardware → FDK → native fallback)
+  - Cover art editor: re-embed thumbnails as center crop, smart crop, or padded blur
 
 Inputs:
   - YouTube / YouTube Music playlist URL (or single video)
   - Excel file with columns: url (required), title (optional), artist (optional)
 """
 
+import io
 import os
 import sys
 import re
@@ -32,7 +34,8 @@ from pathlib import Path
 
 import yt_dlp
 from tqdm import tqdm
-from PIL import Image
+from PIL import Image, ImageFilter, ImageOps
+from mutagen.mp4 import MP4, MP4Cover
 
 try:
     import openpyxl
@@ -118,14 +121,11 @@ def safe_filename(name, max_len=120):
 #  YDL BASE OPTIONS (shared cookie config)
 # ─────────────────────────────────────────────
 
-# Set by main() after parsing --browser arg
 _COOKIE_BROWSER = None
 
 def ydl_base_opts(with_cookies=True):
-    """Base yt-dlp options shared across all calls — includes cookies if set."""
     opts = {'quiet': True, 'logger': QuietLogger(), 'no_warnings': True}
     if _COOKIE_BROWSER and with_cookies:
-        # Full tuple: (browser, profile, keyring, container)
         opts['cookiesfrombrowser'] = (_COOKIE_BROWSER, None, None, None)
     return opts
 
@@ -134,7 +134,6 @@ def ydl_base_opts(with_cookies=True):
 # ─────────────────────────────────────────────
 
 def expand_playlist_url(url):
-    """Return list of (title, url) from a YouTube playlist or single video URL."""
     opts = {**ydl_base_opts(), 'extract_flat': True}
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -158,7 +157,6 @@ def expand_playlist_url(url):
 # ─────────────────────────────────────────────
 
 def load_excel(path):
-    """Load tracks from an Excel file. Required column: url. Optional: title, artist."""
     if openpyxl is None:
         raise RuntimeError("openpyxl not installed. Run: pip install openpyxl")
 
@@ -189,17 +187,12 @@ def load_excel(path):
 # ─────────────────────────────────────────────
 
 def download_audio(url, out_path_no_ext, with_cookies=True):
-    """Download best audio stream. Returns the actual downloaded file path."""
-    def progress_hook(d):
-        pass  # status tracking not needed here
-
     def _attempt(use_cookies):
         opts = {
             **ydl_base_opts(with_cookies=use_cookies),
             'format': 'bestaudio/best',
             'outtmpl': f'{out_path_no_ext}.%(ext)s',
             'ffmpeg_location': FFMPEG,
-            'progress_hooks': [progress_hook],
             'postprocessors': [],
         }
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -207,15 +200,13 @@ def download_audio(url, out_path_no_ext, with_cookies=True):
 
     try:
         _attempt(use_cookies=with_cookies)
-    except Exception as e:
+    except Exception:
         if _COOKIE_BROWSER and with_cookies:
-            # Some videos fail with cookies (region/auth quirks) — retry without
             print(f"  ⚠️  Cookie download failed, retrying without cookies...")
             _attempt(use_cookies=False)
         else:
             raise
 
-    # Find the downloaded file (extension varies)
     parent = Path(out_path_no_ext).parent
     stem   = Path(out_path_no_ext).name
     for f in parent.iterdir():
@@ -229,7 +220,6 @@ def download_audio(url, out_path_no_ext, with_cookies=True):
 # ─────────────────────────────────────────────
 
 def download_thumbnail(url, out_path_no_ext):
-    """Download video thumbnail and convert to JPG. Returns path or None."""
     opts = {
         **ydl_base_opts(),
         'skip_download': True,
@@ -260,6 +250,59 @@ def download_thumbnail(url, out_path_no_ext):
     return None
 
 # ─────────────────────────────────────────────
+#  COVER ART TRANSFORMS
+# ─────────────────────────────────────────────
+
+def art_center_crop(img: Image.Image) -> Image.Image:
+    """Crop to center square."""
+    w, h = img.size
+    side = min(w, h)
+    return img.crop(((w - side) // 2, (h - side) // 2,
+                     (w + side) // 2, (h + side) // 2))
+
+def art_smart_crop(img: Image.Image) -> Image.Image:
+    """Entropy-based crop — finds the most visually interesting square region."""
+    w, h = img.size
+    side = min(w, h)
+    return ImageOps.fit(img, (side, side), method=Image.LANCZOS, centering=(0.5, 0.5))
+
+def art_padded_blur(img: Image.Image) -> Image.Image:
+    """Place original image centered on a blurred, zoomed version of itself."""
+    w, h = img.size
+    side = max(w, h)
+
+    # Build blurred background: zoom and heavily blur the original
+    bg = img.resize((side, side), Image.LANCZOS)
+    bg = bg.filter(ImageFilter.GaussianBlur(radius=side // 20))
+
+    # Paste original centered
+    paste_x = (side - w) // 2
+    paste_y = (side - h) // 2
+    bg.paste(img, (paste_x, paste_y))
+    return bg
+
+def apply_art_style(src_jpg: Path, style: str) -> bytes:
+    """Open a thumbnail, apply the chosen square style, return JPEG bytes."""
+    img = Image.open(src_jpg).convert('RGB')
+    w, h = img.size
+
+    if w == h:
+        # Already square — no transform needed
+        result = img
+    elif style == 'center':
+        result = art_center_crop(img)
+    elif style == 'smart':
+        result = art_smart_crop(img)
+    elif style == 'blur':
+        result = art_padded_blur(img)
+    else:
+        result = img
+
+    buf = io.BytesIO()
+    result.save(buf, format='JPEG', subsampling=0)
+    return buf.getvalue()
+
+# ─────────────────────────────────────────────
 #  GET AUDIO DURATION
 # ─────────────────────────────────────────────
 
@@ -279,7 +322,6 @@ def get_duration_sec(file_path):
 # ─────────────────────────────────────────────
 
 def encode_track(src_file, out_m4a, encoder, title, artist, album, album_artist, track_num, total_tracks, cover_jpg):
-    """Encode audio to M4A with embedded metadata and album art."""
     duration_sec = get_duration_sec(src_file)
 
     cmd = [FFMPEG, '-y', '-i', str(src_file)]
@@ -328,9 +370,20 @@ def encode_track(src_file, out_m4a, encoder, title, artist, album, album_artist,
     pbar.close()
 
     if proc.returncode != 0:
-        # Fallback to native aac
         fallback_cmd = [c if c != encoder else 'aac' for c in cmd]
         subprocess.run(fallback_cmd, check=True, capture_output=True)
+
+# ─────────────────────────────────────────────
+#  REEMBED COVER ART (lossless — audio untouched)
+# ─────────────────────────────────────────────
+
+def reembed_cover(m4a_path: Path, jpeg_bytes: bytes) -> None:
+    """Replace the covr atom in an M4A without touching the audio stream."""
+    audio = MP4(str(m4a_path))
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags['covr'] = [MP4Cover(jpeg_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
+    audio.save()
 
 # ─────────────────────────────────────────────
 #  CACHE  (per-playlist, keyed by URL)
@@ -356,7 +409,6 @@ def save_cache(out_dir: Path, cache: dict):
 # ─────────────────────────────────────────────
 
 def write_m3u(playlist_path, tracks_info):
-    """Write an .m3u playlist file. tracks_info = list of (filename, duration_sec, display_name)"""
     with open(playlist_path, 'w', encoding='utf-8') as f:
         f.write('#EXTM3U\n')
         for filename, duration_sec, display_name in tracks_info:
@@ -378,33 +430,42 @@ def play_notification():
         pass
 
 # ─────────────────────────────────────────────
-#  MAIN
+#  COOKIE / BROWSER SETUP
 # ─────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="YouTube Playlist Maker — downloads tracks as M4A with art + .m3u")
-    parser.add_argument('--url',   help='YouTube playlist or video URL')
-    parser.add_argument('--excel', help='Path to Excel file (.xlsx) with url/title/artist columns')
-    parser.add_argument('--name',  help='Playlist / album name')
-    parser.add_argument('--out',     help='Output directory (default: current directory)')
-    parser.add_argument('--browser', help='Browser to load cookies from (for YouTube Premium/private playlists)',
-                        choices=['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera'])
-    parser.add_argument('--no-notification', action='store_true')
-    args = parser.parse_args()
+BROWSERS = ['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera']
 
-    print("╔══════════════════════════════════════════════════╗")
-    print("║   🎵  YouTube Playlist Maker  v1                 ║")
-    print("╚══════════════════════════════════════════════════╝")
-
+def setup_cookies(browser_arg):
     global _COOKIE_BROWSER
-    BROWSERS = ['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera']
+    if browser_arg:
+        _COOKIE_BROWSER = browser_arg
+    else:
+        print("\n🔐 Use browser cookies? (needed for Premium / private playlists)")
+        for i, b in enumerate(BROWSERS, 1):
+            print(f"   {i} — {b.capitalize()}")
+        print("   0 — No (public videos only)")
+        choice = input("Choice [0-6]: ").strip()
+        if choice in [str(i+1) for i in range(len(BROWSERS))]:
+            _COOKIE_BROWSER = BROWSERS[int(choice) - 1]
+        else:
+            _COOKIE_BROWSER = None
 
-    # ── Encoder ──────────────────────────────────────────────────────────────
+    if _COOKIE_BROWSER:
+        print(f"   🍪 Using cookies from: {_COOKIE_BROWSER.capitalize()}")
+    else:
+        print("   ⚠️  No cookies — only public videos will work")
+
+# ─────────────────────────────────────────────
+#  BUCKET 1 — DOWNLOAD
+# ─────────────────────────────────────────────
+
+def run_download(args):
+    global _COOKIE_BROWSER
+
     print("\n🔍 Detecting AAC encoder...")
     encoder, is_hw, enc_desc = detect_best_aac_encoder()
     print(f"   {'⚡ Hardware' if is_hw else '🖥️  Software'} → {enc_desc}")
 
-    # ── Input mode ───────────────────────────────────────────────────────────
     playlist_name = None
     tracks = []
     needs_cookies = False
@@ -421,7 +482,6 @@ def main():
         needs_cookies = True
 
     else:
-        # Interactive mode
         print("\nHow do you want to provide your tracks?")
         print("  1 — YouTube playlist URL")
         print("  2 — Excel file (.xlsx)")
@@ -442,38 +502,15 @@ def main():
             print("❌ Invalid choice.")
             sys.exit(1)
 
-    # ── Browser / cookie setup (only for YouTube sources) ────────────────────
     if needs_cookies:
-        if args.browser:
-            _COOKIE_BROWSER = args.browser
-        else:
-            print("\n🔐 Use browser cookies? (needed for Premium / private playlists)")
-            print("   1 — Safari")
-            print("   2 — Chrome")
-            print("   3 — Firefox")
-            print("   4 — Edge")
-            print("   5 — Brave")
-            print("   6 — Opera")
-            print("   0 — No (public videos only)")
-            cookie_choice = input("Choice [0-6]: ").strip()
-            if cookie_choice in [str(i+1) for i in range(len(BROWSERS))]:
-                _COOKIE_BROWSER = BROWSERS[int(cookie_choice) - 1]
-            else:
-                _COOKIE_BROWSER = None
+        setup_cookies(args.browser)
 
-        if _COOKIE_BROWSER:
-            print(f"   🍪 Using cookies from: {_COOKIE_BROWSER.capitalize()}")
-        else:
-            print("   ⚠️  No cookies — only public videos will work")
-
-    # ── Fetch URL-based tracks after cookie setup ─────────────────────────────
     if args.url:
         print(f"\n📋 Fetching playlist info...")
         playlist_name, tracks = expand_playlist_url(args.url)
         if args.name:
             playlist_name = args.name
     elif not args.excel and needs_cookies and not tracks:
-        # Interactive YouTube URL path
         url = input("YouTube playlist URL: ").strip()
         print("📋 Fetching playlist info...")
         playlist_name, tracks = expand_playlist_url(url)
@@ -492,13 +529,11 @@ def main():
 
     playlist_name = safe_filename(playlist_name)
 
-    # ── Output folder ─────────────────────────────────────────────────────────
     base_out = Path(args.out) if args.out else Path(os.getcwd())
     out_dir  = base_out / playlist_name
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\n📁 Output folder: {out_dir}")
 
-    # ── Load cache (rebuild from existing files if missing) ───────────────────
     cache = load_cache(out_dir)
     if cache:
         print(f"\n💾 Cache loaded — {len(cache)} track(s) previously downloaded.")
@@ -506,7 +541,6 @@ def main():
         existing_m4a = list(out_dir.glob('*.m4a'))
         if existing_m4a:
             print(f"\n🔄 No cache found but {len(existing_m4a)} existing file(s) detected — rebuilding cache from filenames...")
-            # For each track in the playlist, check if a matching file exists by title
             rebuilt = 0
             for tidx, track in enumerate(tracks, 1):
                 if not track.get('title'):
@@ -530,7 +564,6 @@ def main():
                 save_cache(out_dir, cache)
                 print(f"   ✅ Rebuilt cache for {rebuilt} track(s).")
 
-    # ── Download + encode each track ──────────────────────────────────────────
     total       = len(tracks)
     m3u_data    = []
     succeeded   = 0
@@ -538,12 +571,11 @@ def main():
     total_start = time.time()
 
     for idx, track in enumerate(tracks, 1):
-        url    = track['url']
+        url           = track['url']
         track_num_str = f"{idx:02d}"
 
         print(f"\n{'─'*52}")
 
-        # ── Cache hit: skip immediately, no network call needed ───────────────
         if url in cache:
             entry    = cache[url]
             title    = entry['title']
@@ -551,7 +583,6 @@ def main():
             filename = f"{track_num_str} - {safe_filename(title)}.m4a"
             out_m4a  = out_dir / filename
 
-            # If file was renamed (track reordered), fix it
             cached_file = out_dir / entry['filename']
             if cached_file.exists() and cached_file != out_m4a:
                 cached_file.rename(out_m4a)
@@ -566,7 +597,6 @@ def main():
                 print(f"  [{idx}/{total}] ⏭️  {title}  (cached)")
                 continue
 
-        # ── Cache miss: fetch metadata from YouTube ───────────────────────────
         artist = track.get('artist', '')
         if not track.get('title') or not artist:
             print(f"  [{idx}/{total}] Fetching info...")
@@ -576,8 +606,6 @@ def main():
                 if not track.get('title'):
                     track['title'] = info.get('title', f'Track {idx}')
                 if not artist:
-                    # 'artist' is populated by yt-dlp for YouTube Music links;
-                    # fall back to creator/uploader/channel for regular YouTube
                     artist = (info.get('artist') or info.get('creator')
                               or info.get('uploader') or info.get('channel', ''))
             except Exception:
@@ -591,7 +619,6 @@ def main():
         if artist:
             print(f"       Artist: {artist}")
 
-        # ── Download + encode ─────────────────────────────────────────────────
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
@@ -620,7 +647,6 @@ def main():
             display  = f"{artist} - {title}" if artist else title
             m3u_data.append((filename, duration, display))
 
-            # Write to cache immediately so a mid-run interrupt doesn't lose progress
             cache[url] = {'title': title, 'artist': artist,
                           'filename': filename, 'duration': duration}
             save_cache(out_dir, cache)
@@ -631,13 +657,11 @@ def main():
         except Exception as e:
             print(f"  ❌ Failed: {e}")
 
-    # ── Write .m3u ────────────────────────────────────────────────────────────
     if m3u_data:
         m3u_path = out_dir / f"{playlist_name}.m3u"
         write_m3u(m3u_path, m3u_data)
         print(f"\n📋 Playlist file: {m3u_path.name}")
 
-    # ── Summary ───────────────────────────────────────────────────────────────
     elapsed = time.time() - total_start
     print(f"\n{'═'*52}")
     print(f"🎉 Done!  {succeeded} downloaded  |  {skipped} skipped  |  {total - succeeded - skipped} failed")
@@ -647,6 +671,137 @@ def main():
 
     if not args.no_notification:
         play_notification()
+
+# ─────────────────────────────────────────────
+#  BUCKET 2 — MAKE EDITS
+# ─────────────────────────────────────────────
+
+def run_edit_cover_art(args):
+    """Re-download thumbnails for every cached track and re-embed as a square."""
+
+    # ── Locate folder ─────────────────────────────────────────────────────────
+    if args.out:
+        folder = Path(args.out)
+    else:
+        folder = Path(input("\n📁 Path to playlist folder: ").strip().strip('"\''))
+
+    if not folder.is_dir():
+        print(f"❌ Folder not found: {folder}")
+        sys.exit(1)
+
+    cache = load_cache(folder)
+    if not cache:
+        print("❌ No streamlist_cache.json found in that folder. Only folders downloaded by streamlist are supported.")
+        sys.exit(1)
+
+    print(f"   Found {len(cache)} cached track(s).")
+
+    # ── Choose crop style ─────────────────────────────────────────────────────
+    print("\n🖼️  Choose cover art style:")
+    print("   1 — Center crop   (safe, always works)")
+    print("   2 — Smart crop    (entropy-based — finds the most interesting region)")
+    print("   3 — Padded blur   (original image centered on blurred background)")
+    style_choice = input("Choice [1/2/3]: ").strip()
+    style_map = {'1': 'center', '2': 'smart', '3': 'blur'}
+    style = style_map.get(style_choice)
+    if not style:
+        print("❌ Invalid choice.")
+        sys.exit(1)
+
+    # ── Cookie setup for thumbnail re-downloads ────────────────────────────────
+    setup_cookies(args.browser)
+
+    # ── Process each track ────────────────────────────────────────────────────
+    total     = len(cache)
+    succeeded = 0
+    skipped   = 0
+    t0        = time.time()
+
+    for idx, (url, entry) in enumerate(cache.items(), 1):
+        title    = entry.get('title', f'Track {idx}')
+        filename = entry.get('filename', '')
+        m4a_path = folder / filename
+
+        print(f"\n{'─'*52}")
+        print(f"  [{idx}/{total}] 🎵 {title}")
+
+        if not m4a_path.exists():
+            print(f"  ⚠️  File not found, skipping: {filename}")
+            skipped += 1
+            continue
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cover = download_thumbnail(url, str(Path(tmp) / 'thumb'))
+                if not cover:
+                    print(f"  ⚠️  No thumbnail found, skipping.")
+                    skipped += 1
+                    continue
+
+                jpeg_bytes = apply_art_style(cover, style)
+                reembed_cover(m4a_path, jpeg_bytes)
+
+            print(f"  ✅ Cover updated: {filename}")
+            succeeded += 1
+
+        except Exception as e:
+            print(f"  ❌ Failed: {e}")
+
+    elapsed = time.time() - t0
+    print(f"\n{'═'*52}")
+    print(f"🎉 Done!  {succeeded} updated  |  {skipped} skipped  |  {total - succeeded - skipped} failed")
+    print(f"⏱️  Total time: {int(elapsed//60)}m {elapsed%60:.1f}s")
+    print(f"{'═'*52}")
+
+    if not args.no_notification:
+        play_notification()
+
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="streamlist — YouTube playlist downloader and editor")
+    parser.add_argument('--url',             help='YouTube playlist or video URL')
+    parser.add_argument('--excel',           help='Path to Excel file (.xlsx) with url/title/artist columns')
+    parser.add_argument('--name',            help='Playlist / album name')
+    parser.add_argument('--out',             help='Output directory (default: current directory)')
+    parser.add_argument('--browser',         help='Browser to load cookies from',
+                        choices=['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera'])
+    parser.add_argument('--no-notification', action='store_true')
+    args = parser.parse_args()
+
+    print("╔══════════════════════════════════════════════════╗")
+    print("║   🎵  streamlist                                 ║")
+    print("╚══════════════════════════════════════════════════╝")
+
+    # If a URL or Excel was passed directly, go straight to download
+    if args.url or args.excel:
+        run_download(args)
+        return
+
+    print("\nWhat would you like to do?")
+    print("  1 — Download  (new playlist or sync existing)")
+    print("  2 — Make edits")
+    bucket = input("Choice [1/2]: ").strip()
+
+    if bucket == '1':
+        run_download(args)
+
+    elif bucket == '2':
+        print("\nMake edits:")
+        print("  1 — Fix cover art  (re-download & reshape to square)")
+        edit_choice = input("Choice [1]: ").strip()
+
+        if edit_choice == '1':
+            run_edit_cover_art(args)
+        else:
+            print("❌ Invalid choice.")
+            sys.exit(1)
+
+    else:
+        print("❌ Invalid choice.")
+        sys.exit(1)
 
 
 if __name__ == '__main__':

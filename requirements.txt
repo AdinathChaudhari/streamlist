@@ -2,3 +2,4 @@ yt-dlp
 openpyxl
 tqdm
 Pillow
+mutagen

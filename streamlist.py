@@ -32,6 +32,7 @@ from pathlib import Path
 
 import yt_dlp
 from tqdm import tqdm
+from PIL import Image
 
 try:
     import openpyxl
@@ -245,13 +246,20 @@ def download_thumbnail(url, out_path_no_ext):
     for ext in ['jpg', 'jpeg', 'png', 'webp']:
         src = Path(f'{out_path_no_ext}.{ext}')
         if src.exists():
-            jpg = Path(f'{out_path_no_ext}_thumb.jpg')
-            subprocess.run(
-                [FFMPEG, '-y', '-i', str(src), str(jpg)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            src.unlink(missing_ok=True)
-            return jpg if jpg.exists() else None
+            try:
+                img = Image.open(src).convert('RGB')
+                w, h = img.size
+                side = min(w, h)
+                img  = img.crop(((w - side) // 2, (h - side) // 2,
+                                 (w + side) // 2, (h + side) // 2))
+                img  = img.resize((600, 600), Image.LANCZOS)
+                jpg  = Path(f'{out_path_no_ext}_thumb.jpg')
+                img.save(str(jpg), format='JPEG', quality=90, subsampling=0)
+                src.unlink(missing_ok=True)
+                return jpg
+            except Exception:
+                src.unlink(missing_ok=True)
+                return None
 
     return None
 
@@ -274,7 +282,7 @@ def get_duration_sec(file_path):
 #  ENCODE TO M4A WITH METADATA + ART
 # ─────────────────────────────────────────────
 
-def encode_track(src_file, out_m4a, encoder, title, artist, album, track_num, total_tracks, cover_jpg):
+def encode_track(src_file, out_m4a, encoder, title, artist, album, album_artist, track_num, total_tracks, cover_jpg):
     """Encode audio to M4A with embedded metadata and album art."""
     duration_sec = get_duration_sec(src_file)
 
@@ -292,6 +300,7 @@ def encode_track(src_file, out_m4a, encoder, title, artist, album, track_num, to
         '-metadata', f'title={title}',
         '-metadata', f'artist={artist}',
         '-metadata', f'album={album}',
+        '-metadata', f'album_artist={album_artist}',
         '-metadata', f'track={track_num}/{total_tracks}',
     ]
 
@@ -572,9 +581,9 @@ def main():
                     track['title'] = info.get('title', f'Track {idx}')
                 if not artist:
                     # 'artist' is populated by yt-dlp for YouTube Music links;
-                    # fall back to uploader/channel for regular YouTube
-                    artist = (info.get('artist') or info.get('uploader')
-                              or info.get('channel', ''))
+                    # fall back to creator/uploader/channel for regular YouTube
+                    artist = (info.get('artist') or info.get('creator')
+                              or info.get('uploader') or info.get('channel', ''))
             except Exception:
                 track['title'] = f'Track {idx}'
 
@@ -604,6 +613,7 @@ def main():
                     title=title,
                     artist=artist,
                     album=playlist_name,
+                    album_artist=f"Aey - {playlist_name}",
                     track_num=idx,
                     total_tracks=total,
                     cover_jpg=cover,

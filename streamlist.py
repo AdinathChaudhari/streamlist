@@ -293,7 +293,6 @@ def encode_track(src_file, out_m4a, encoder, title, artist, album, track_num, to
         '-metadata', f'artist={artist}',
         '-metadata', f'album={album}',
         '-metadata', f'track={track_num}/{total_tracks}',
-        '-metadata', f'genre=Music',
     ]
 
     if inputs == 2:
@@ -392,31 +391,8 @@ def main():
     print("║   🎵  YouTube Playlist Maker  v1                 ║")
     print("╚══════════════════════════════════════════════════╝")
 
-    # ── Browser / cookie setup ────────────────────────────────────────────────
     global _COOKIE_BROWSER
     BROWSERS = ['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera']
-
-    if args.browser:
-        _COOKIE_BROWSER = args.browser
-    else:
-        print("\n🔐 Use browser cookies? (needed for Premium / private playlists)")
-        print("   1 — Safari")
-        print("   2 — Chrome")
-        print("   3 — Firefox")
-        print("   4 — Edge")
-        print("   5 — Brave")
-        print("   6 — Opera")
-        print("   0 — No (public videos only)")
-        choice = input("Choice [0-6]: ").strip()
-        if choice in [str(i+1) for i in range(len(BROWSERS))]:
-            _COOKIE_BROWSER = BROWSERS[int(choice) - 1]
-        else:
-            _COOKIE_BROWSER = None
-
-    if _COOKIE_BROWSER:
-        print(f"   🍪 Using cookies from: {_COOKIE_BROWSER.capitalize()}")
-    else:
-        print("   ⚠️  No cookies — only public videos will work")
 
     # ── Encoder ──────────────────────────────────────────────────────────────
     print("\n🔍 Detecting AAC encoder...")
@@ -426,19 +402,18 @@ def main():
     # ── Input mode ───────────────────────────────────────────────────────────
     playlist_name = None
     tracks = []
+    needs_cookies = False
 
     if args.excel:
-        source_path = args.excel
+        source_path = args.excel.strip('"\'').strip()
         print(f"\n📄 Loading tracks from Excel: {source_path}")
         tracks = load_excel(source_path)
         print(f"   {len(tracks)} track(s) found")
         playlist_name = args.name or Path(source_path).stem
+        needs_cookies = True
 
     elif args.url:
-        print(f"\n📋 Fetching playlist info...")
-        playlist_name, tracks = expand_playlist_url(args.url)
-        if args.name:
-            playlist_name = args.name
+        needs_cookies = True
 
     else:
         # Interactive mode
@@ -448,21 +423,57 @@ def main():
         choice = input("Choice [1/2]: ").strip()
 
         if choice == '1':
-            url = input("YouTube playlist URL: ").strip()
-            print("📋 Fetching playlist info...")
-            playlist_name, tracks = expand_playlist_url(url)
+            needs_cookies = True
         elif choice == '2':
-            path = input("Excel file path: ").strip().strip('"')
+            path = input("Excel file path: ").strip().strip('"\'').strip()
             if not os.path.isfile(path):
                 print(f"❌ File not found: {path}")
                 sys.exit(1)
             tracks = load_excel(path)
             print(f"   {len(tracks)} track(s) found")
             playlist_name = Path(path).stem
+            needs_cookies = True
         else:
             print("❌ Invalid choice.")
             sys.exit(1)
 
+    # ── Browser / cookie setup (only for YouTube sources) ────────────────────
+    if needs_cookies:
+        if args.browser:
+            _COOKIE_BROWSER = args.browser
+        else:
+            print("\n🔐 Use browser cookies? (needed for Premium / private playlists)")
+            print("   1 — Safari")
+            print("   2 — Chrome")
+            print("   3 — Firefox")
+            print("   4 — Edge")
+            print("   5 — Brave")
+            print("   6 — Opera")
+            print("   0 — No (public videos only)")
+            cookie_choice = input("Choice [0-6]: ").strip()
+            if cookie_choice in [str(i+1) for i in range(len(BROWSERS))]:
+                _COOKIE_BROWSER = BROWSERS[int(cookie_choice) - 1]
+            else:
+                _COOKIE_BROWSER = None
+
+        if _COOKIE_BROWSER:
+            print(f"   🍪 Using cookies from: {_COOKIE_BROWSER.capitalize()}")
+        else:
+            print("   ⚠️  No cookies — only public videos will work")
+
+    # ── Fetch URL-based tracks after cookie setup ─────────────────────────────
+    if args.url:
+        print(f"\n📋 Fetching playlist info...")
+        playlist_name, tracks = expand_playlist_url(args.url)
+        if args.name:
+            playlist_name = args.name
+    elif not args.excel and needs_cookies and not tracks:
+        # Interactive YouTube URL path
+        url = input("YouTube playlist URL: ").strip()
+        print("📋 Fetching playlist info...")
+        playlist_name, tracks = expand_playlist_url(url)
+
+    if not args.excel and not args.url:
         if args.name:
             playlist_name = args.name
         else:

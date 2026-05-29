@@ -545,11 +545,11 @@ def run_download(args):
     playlist_name = safe_filename(playlist_name)
 
     # ── Album tag overrides ───────────────────────────────────────────────────
-    default_album_artist = f"Aey - {playlist_name}"
     print(f"\n🏷️  Album tags (press Enter to keep defaults):")
-    album_input        = input(f"   Album name    [{playlist_name}]: ").strip()
+    album_input  = input(f"   Album name    [{playlist_name}]: ").strip()
+    album_name   = album_input or playlist_name
+    default_album_artist = f"Aey - {album_name}"
     album_artist_input = input(f"   Album artist  [{default_album_artist}]: ").strip()
-    album_name   = album_input        or playlist_name
     album_artist = album_artist_input or default_album_artist
 
     # ── Cover art style ───────────────────────────────────────────────────────

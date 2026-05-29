@@ -544,6 +544,14 @@ def run_download(args):
 
     playlist_name = safe_filename(playlist_name)
 
+    # ── Album tag overrides ───────────────────────────────────────────────────
+    default_album_artist = f"Aey - {playlist_name}"
+    print(f"\n🏷️  Album tags (press Enter to keep defaults):")
+    album_input        = input(f"   Album name    [{playlist_name}]: ").strip()
+    album_artist_input = input(f"   Album artist  [{default_album_artist}]: ").strip()
+    album_name   = album_input        or playlist_name
+    album_artist = album_artist_input or default_album_artist
+
     # ── Cover art style ───────────────────────────────────────────────────────
     print("\n🖼️  Cover art style for non-square thumbnails:")
     print("   0 — Keep as-is")
@@ -668,8 +676,8 @@ def run_download(args):
                     encoder=encoder,
                     title=title,
                     artist=artist,
-                    album=playlist_name,
-                    album_artist=f"Aey - {playlist_name}",
+                    album=album_name,
+                    album_artist=album_artist,
                     track_num=idx,
                     total_tracks=total,
                     cover_jpg=cover,

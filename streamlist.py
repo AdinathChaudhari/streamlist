@@ -247,14 +247,8 @@ def download_thumbnail(url, out_path_no_ext):
         src = Path(f'{out_path_no_ext}.{ext}')
         if src.exists():
             try:
-                img = Image.open(src).convert('RGB')
-                w, h = img.size
-                side = min(w, h)
-                img  = img.crop(((w - side) // 2, (h - side) // 2,
-                                 (w + side) // 2, (h + side) // 2))
-                img  = img.resize((600, 600), Image.LANCZOS)
-                jpg  = Path(f'{out_path_no_ext}_thumb.jpg')
-                img.save(str(jpg), format='JPEG', quality=90, subsampling=0)
+                jpg = Path(f'{out_path_no_ext}_thumb.jpg')
+                Image.open(src).convert('RGB').save(str(jpg), format='JPEG', quality=95, subsampling=0)
                 src.unlink(missing_ok=True)
                 return jpg
             except Exception:

@@ -10,7 +10,7 @@ Works with YouTube, YouTube Music, private playlists, and YouTube Premium conten
 
 - Downloads the best available audio stream for each track
 - Re-encodes to M4A (AAC 256k) using the best encoder available on your machine
-- Embeds the video thumbnail as album art (full resolution, sRGB JPEG)
+- Embeds the video thumbnail as album art at original quality (converts png/webp to JPEG only if needed)
 - Writes tags: title, artist, album, album artist, track number
 - Generates a `.m3u` playlist file so any music player can load the full collection
 - **Resume & sync** — skips tracks already downloaded; re-running only fetches what's missing
@@ -215,7 +215,7 @@ streamlist supports Premium-only and private/unlisted playlists by reading cooki
 4. **Per-track pipeline** (inside a temp folder that auto-cleans):
    - Skips instantly if URL is in cache and file exists
    - Downloads best audio stream (opus/AAC/webm, whatever YouTube offers)
-   - Downloads thumbnail → converts to sRGB JPEG (full resolution)
+   - Downloads thumbnail → embeds as-is if JPEG, converts only if png/webp
    - Re-encodes to M4A with embedded art and tags
    - Writes entry to cache immediately after success
 5. **M3U generation** — rewrites the portable playlist file with relative paths

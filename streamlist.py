@@ -246,9 +246,11 @@ def download_thumbnail(url, out_path_no_ext):
     for ext in ['jpg', 'jpeg', 'png', 'webp']:
         src = Path(f'{out_path_no_ext}.{ext}')
         if src.exists():
+            if ext in ('jpg', 'jpeg'):
+                return src  # already a JPEG — embed as-is
             try:
                 jpg = Path(f'{out_path_no_ext}_thumb.jpg')
-                Image.open(src).convert('RGB').save(str(jpg), format='JPEG', quality=95, subsampling=0)
+                Image.open(src).convert('RGB').save(str(jpg), format='JPEG', subsampling=0)
                 src.unlink(missing_ok=True)
                 return jpg
             except Exception:

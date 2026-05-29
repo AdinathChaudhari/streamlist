@@ -544,6 +544,15 @@ def run_download(args):
 
     playlist_name = safe_filename(playlist_name)
 
+    # ── Cover art style ───────────────────────────────────────────────────────
+    print("\n🖼️  Cover art style for non-square thumbnails:")
+    print("   0 — Keep as-is")
+    print("   1 — Center crop")
+    print("   2 — Smart crop   (entropy-based)")
+    print("   3 — Padded blur  (Spotify-style)")
+    art_choice = input("Choice [0/1/2/3]: ").strip()
+    art_style  = {'1': 'center', '2': 'smart', '3': 'blur'}.get(art_choice, None)
+
     base_out = Path(args.out) if args.out else Path(os.getcwd())
     out_dir  = base_out / playlist_name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -643,6 +652,15 @@ def run_download(args):
 
                 print(f"  🖼️  Downloading thumbnail...")
                 cover = download_thumbnail(url, str(tmp_path / 'thumb'))
+
+                if cover and art_style:
+                    img = Image.open(cover)
+                    w, h = img.size
+                    img.close()
+                    if w != h:
+                        styled = tmp_path / 'cover_styled.jpg'
+                        styled.write_bytes(apply_art_style(cover, art_style))
+                        cover = styled
 
                 encode_track(
                     src_file=raw_audio,

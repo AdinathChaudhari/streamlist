@@ -13,6 +13,7 @@ streamlist has two modes: **Download** and **Make edits**.
 ### Download
 - Downloads the best available audio stream for each track
 - Re-encodes to M4A (AAC 256k) using the best encoder available on your machine
+- Asks how to handle non-square thumbnails: keep as-is, center crop, smart crop, or padded blur
 - Embeds the video thumbnail as album art at original quality (converts png/webp to JPEG only if needed)
 - Writes tags: title, artist, album, album artist, track number
 - Generates a `.m3u` playlist file so any music player can load the full collection

@@ -26,6 +26,7 @@ streamlist has two modes: **Download** and **Make edits**.
   - **Center crop** — crops to the middle square of the image
   - **Smart crop** — entropy-based crop that finds the most visually interesting region
   - **Padded blur** — places the original image centered on a blurred, zoomed background (Spotify-style)
+- **Rename album / album artist** — rewrite the album name and album artist tags across all tracks in a folder, independently of the folder name. Audio is never touched.
 
 **Output structure:**
 ```

@@ -386,6 +386,21 @@ def reembed_cover(m4a_path: Path, jpeg_bytes: bytes) -> None:
     audio.save()
 
 # ─────────────────────────────────────────────
+#  RENAME ALBUM TAGS (lossless — audio untouched)
+# ─────────────────────────────────────────────
+
+def rename_album_tags(m4a_path: Path, album: str | None, album_artist: str | None) -> None:
+    """Rewrite album and/or album_artist tags without touching the audio stream."""
+    audio = MP4(str(m4a_path))
+    if audio.tags is None:
+        audio.add_tags()
+    if album is not None:
+        audio.tags['\xa9alb'] = [album]
+    if album_artist is not None:
+        audio.tags['aART'] = [album_artist]
+    audio.save()
+
+# ─────────────────────────────────────────────
 #  CACHE  (per-playlist, keyed by URL)
 # ─────────────────────────────────────────────
 
@@ -756,6 +771,59 @@ def run_edit_cover_art(args):
     if not args.no_notification:
         play_notification()
 
+def run_edit_rename_album(args):
+    """Rename album and/or album artist tags across all M4A files in a folder."""
+
+    if args.out:
+        folder = Path(args.out)
+    else:
+        folder = Path(input("\n📁 Path to playlist folder: ").strip().strip('"\''))
+
+    if not folder.is_dir():
+        print(f"❌ Folder not found: {folder}")
+        sys.exit(1)
+
+    m4a_files = sorted(folder.glob('*.m4a'))
+    if not m4a_files:
+        print("❌ No M4A files found in that folder.")
+        sys.exit(1)
+
+    # Read current values from the first file as a reference
+    ref = MP4(str(m4a_files[0]))
+    current_album        = (ref.tags.get('\xa9alb') or [''])[0] if ref.tags else ''
+    current_album_artist = (ref.tags.get('aART')    or [''])[0] if ref.tags else ''
+
+    print(f"\n   Current album        : {current_album or '(none)'}")
+    print(f"   Current album artist : {current_album_artist or '(none)'}")
+
+    new_album = input(f"\nNew album name        [{current_album}]: ").strip()
+    new_album_artist = input(f"New album artist      [{current_album_artist}]: ").strip()
+
+    if not new_album and not new_album_artist:
+        print("Nothing to change.")
+        return
+
+    album        = new_album        or None
+    album_artist = new_album_artist or None
+
+    total     = len(m4a_files)
+    succeeded = 0
+
+    for idx, m4a in enumerate(m4a_files, 1):
+        try:
+            rename_album_tags(m4a, album, album_artist)
+            print(f"  [{idx}/{total}] ✅ {m4a.name}")
+            succeeded += 1
+        except Exception as e:
+            print(f"  [{idx}/{total}] ❌ {m4a.name}: {e}")
+
+    print(f"\n{'═'*52}")
+    print(f"🎉 Done!  {succeeded}/{total} files updated")
+    print(f"{'═'*52}")
+
+    if not args.no_notification:
+        play_notification()
+
 # ─────────────────────────────────────────────
 #  MAIN
 # ─────────────────────────────────────────────
@@ -790,11 +858,14 @@ def main():
 
     elif bucket == '2':
         print("\nMake edits:")
-        print("  1 — Fix cover art  (re-download & reshape to square)")
-        edit_choice = input("Choice [1]: ").strip()
+        print("  1 — Fix cover art       (re-download & reshape to square)")
+        print("  2 — Rename album / album artist")
+        edit_choice = input("Choice [1/2]: ").strip()
 
         if edit_choice == '1':
             run_edit_cover_art(args)
+        elif edit_choice == '2':
+            run_edit_rename_album(args)
         else:
             print("❌ Invalid choice.")
             sys.exit(1)

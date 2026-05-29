@@ -557,7 +557,7 @@ def run_download(args):
         if existing_m4a:
             print(f"\n🔄 No cache found but {len(existing_m4a)} existing file(s) detected — rebuilding cache from filenames...")
             rebuilt = 0
-            for tidx, track in enumerate(tracks, 1):
+            for track in tracks:
                 if not track.get('title'):
                     continue
                 title  = track['title']
@@ -857,18 +857,23 @@ def main():
         run_download(args)
 
     elif bucket == '2':
-        print("\nMake edits:")
-        print("  1 — Fix cover art       (re-download & reshape to square)")
-        print("  2 — Rename album / album artist")
-        edit_choice = input("Choice [1/2]: ").strip()
+        while True:
+            print("\nMake edits:")
+            print("  1 — Fix cover art       (re-download & reshape to square)")
+            print("  2 — Rename album / album artist")
+            edit_choice = input("Choice [1/2]: ").strip()
 
-        if edit_choice == '1':
-            run_edit_cover_art(args)
-        elif edit_choice == '2':
-            run_edit_rename_album(args)
-        else:
-            print("❌ Invalid choice.")
-            sys.exit(1)
+            if edit_choice == '1':
+                run_edit_cover_art(args)
+            elif edit_choice == '2':
+                run_edit_rename_album(args)
+            else:
+                print("❌ Invalid choice.")
+                sys.exit(1)
+
+            again = input("\nMake another edit? [y/N]: ").strip().lower()
+            if again != 'y':
+                break
 
     else:
         print("❌ Invalid choice.")

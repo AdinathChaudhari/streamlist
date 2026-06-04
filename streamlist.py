@@ -117,6 +117,10 @@ def safe_filename(name, max_len=120):
     name = name.strip('. ')
     return name[:max_len] if len(name) > max_len else name
 
+def normalize_url(url: str) -> str:
+    """Canonicalize youtube.com vs music.youtube.com so cache keys are consistent."""
+    return url.replace('music.youtube.com', 'www.youtube.com')
+
 # ─────────────────────────────────────────────
 #  YDL BASE OPTIONS (shared cookie config)
 # ─────────────────────────────────────────────
@@ -145,7 +149,7 @@ def expand_playlist_url(url):
             if not e:
                 continue
             vid_url = e.get('url') or e.get('webpage_url') or f"https://www.youtube.com/watch?v={e['id']}"
-            tracks.append({'title': e.get('title', ''), 'url': vid_url, 'artist': ''})
+            tracks.append({'title': e.get('title', ''), 'url': normalize_url(vid_url), 'artist': ''})
         print(f"  Found {len(tracks)} track(s) in playlist: {info.get('title', url)}")
         return info.get('title', 'Playlist'), tracks
     else:
@@ -601,7 +605,7 @@ def run_download(args):
     total_start = time.time()
 
     for idx, track in enumerate(tracks, 1):
-        url = track['url']
+        url = normalize_url(track['url'])
 
         print(f"\n{'─'*52}")
 

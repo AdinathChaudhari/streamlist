@@ -145,7 +145,7 @@ After each successful download, the track's metadata is written to `streamlist_c
 
 ```json
 {
-  "https://music.youtube.com/watch?v=abc123": {
+  "https://www.youtube.com/watch?v=abc123": {
     "title": "Get Lucky",
     "artist": "Daft Punk",
     "filename": "Get Lucky.m4a",
@@ -153,6 +153,8 @@ After each successful download, the track's metadata is written to `streamlist_c
   }
 }
 ```
+
+All URLs are normalized to `www.youtube.com` before being used as cache keys, so the same track is always recognized whether the playlist returns a `youtube.com` or `music.youtube.com` URL.
 
 On re-runs:
 - **Cache hit** → track is skipped instantly with zero network calls
@@ -190,6 +192,7 @@ python fix_cache.py /path/to/folder --strip ". [indie playlist]" --strip " (offi
 ```
 
 **What it does:**
+- Normalizes `music.youtube.com` → `www.youtube.com` cache keys, collapsing duplicates (keeps the cleaner/shorter title)
 - Strips `01 - ` style number prefixes from filenames (legacy format migration)
 - Strips any suffixes you specify from track titles in the cache and filenames on disk
 - If you already manually renamed files on disk, updates the cache to match without touching the files

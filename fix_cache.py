@@ -61,7 +61,22 @@ def main():
         print(f"❌ No {CACHE_FILE} found in {folder}")
         sys.exit(1)
 
-    cache = json.loads(cache_path.read_text(encoding='utf-8'))
+    raw_cache = json.loads(cache_path.read_text(encoding='utf-8'))
+
+    # Normalize music.youtube.com → www.youtube.com keys, merging duplicates.
+    # When two entries map to the same key, keep the one with the shorter/cleaner title.
+    cache = {}
+    for url, entry in raw_cache.items():
+        normalized = url.replace('music.youtube.com', 'www.youtube.com')
+        if normalized not in cache:
+            cache[normalized] = entry
+        else:
+            existing_title = cache[normalized].get('title', '')
+            new_title = entry.get('title', '')
+            if len(new_title) < len(existing_title):
+                print(f"  🔀 Merging duplicate: kept \"{new_title}\" over \"{existing_title}\"")
+                cache[normalized] = entry
+
     strip_patterns = args.strip
 
     if not strip_patterns:

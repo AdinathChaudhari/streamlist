@@ -580,8 +580,7 @@ def run_download(args):
                 artist = track.get('artist', '')
                 needle = safe_filename(title).lower()
                 for f in existing_m4a:
-                    stem = re.sub(r'^\d+\s*-\s*', '', f.stem).lower()
-                    if stem == needle:
+                    if f.stem.lower() == needle:
                         duration = get_duration_sec(f)
                         cache[track['url']] = {
                             'title':    title,
@@ -602,8 +601,7 @@ def run_download(args):
     total_start = time.time()
 
     for idx, track in enumerate(tracks, 1):
-        url           = track['url']
-        track_num_str = f"{idx:02d}"
+        url = track['url']
 
         print(f"\n{'─'*52}")
 
@@ -611,7 +609,7 @@ def run_download(args):
             entry    = cache[url]
             title    = entry['title']
             artist   = entry.get('artist', '')
-            filename = f"{track_num_str} - {safe_filename(title)}.m4a"
+            filename = f"{safe_filename(title)}.m4a"
             out_m4a  = out_dir / filename
 
             cached_file = out_dir / entry['filename']
@@ -643,7 +641,7 @@ def run_download(args):
                 track['title'] = f'Track {idx}'
 
         title    = track['title']
-        filename = f"{track_num_str} - {safe_filename(title)}.m4a"
+        filename = f"{safe_filename(title)}.m4a"
         out_m4a  = out_dir / filename
 
         print(f"  [{idx}/{total}] 🎵 {title}")

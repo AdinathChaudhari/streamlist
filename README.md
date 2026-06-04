@@ -33,9 +33,9 @@ streamlist has two modes: **Download** and **Make edits**.
 **Output structure:**
 ```
 My Playlist/
-  01 - Track One.m4a
-  02 - Track Two.m4a
-  03 - Track Three.m4a
+  Track One.m4a
+  Track Two.m4a
+  Track Three.m4a
   My Playlist.m3u
   streamlist_cache.json
 ```
@@ -148,7 +148,7 @@ After each successful download, the track's metadata is written to `streamlist_c
   "https://music.youtube.com/watch?v=abc123": {
     "title": "Get Lucky",
     "artist": "Daft Punk",
-    "filename": "01 - Get Lucky.m4a",
+    "filename": "Get Lucky.m4a",
     "duration": 248
   }
 }
@@ -162,6 +162,23 @@ On re-runs:
 ### Adding new songs to a playlist
 
 Just re-run the same command. Existing tracks are skipped; only new ones are downloaded. The `.m3u` is always rewritten to reflect the full current playlist.
+
+### Migrating from an older version (numbered filenames)
+
+Older versions of streamlist prefixed filenames with a track number (`01 - Song.m4a`). Filenames are now just the track title (`Song.m4a`), which makes the cache stable when you add or reorder songs in a playlist.
+
+If you have existing folders with numbered filenames, run the one-time migration script:
+
+```bash
+python fix_cache.py /path/to/playlist/folder
+```
+
+This will:
+- Strip the `01 - ` style prefix from every `.m4a` file on disk
+- Update `streamlist_cache.json` to match the new filenames
+- Append the artist name to disambiguate tracks that share the same title: `Song Title (Artist Name).m4a`
+
+Delete `fix_cache.py` after you're done — it's a one-time migration tool.
 
 ### Older downloads (no cache file)
 
@@ -200,7 +217,7 @@ even after the cookie retry attempt.
   "https://music.youtube.com/watch?v=<video_id>": {
     "title": "Song Name",
     "artist": "Artist Name",
-    "filename": "22 - Song Name.m4a",
+    "filename": "Song Name.m4a",
     "duration": 0
   }
   ```

@@ -163,22 +163,37 @@ On re-runs:
 
 Just re-run the same command. Existing tracks are skipped; only new ones are downloaded. The `.m3u` is always rewritten to reflect the full current playlist.
 
-### Migrating from an older version (numbered filenames)
+### fix_cache.py — cache repair tool
 
-Older versions of streamlist prefixed filenames with a track number (`01 - Song.m4a`). Filenames are now just the track title (`Song.m4a`), which makes the cache stable when you add or reorder songs in a playlist.
-
-If you have existing folders with numbered filenames, run the one-time migration script:
+`fix_cache.py` fixes mismatches between `streamlist_cache.json` and the actual files on disk. Run it whenever the cache and filenames have drifted out of sync.
 
 ```bash
 python fix_cache.py /path/to/playlist/folder
 ```
 
-This will:
-- Strip the `01 - ` style prefix from every `.m4a` file on disk
-- Update `streamlist_cache.json` to match the new filenames
-- Append the artist name to disambiguate tracks that share the same title: `Song Title (Artist Name).m4a`
+When run, it prompts for any title suffixes you want stripped:
 
-Delete `fix_cache.py` after you're done — it's a one-time migration tool.
+```
+Enter suffix(es) to strip from track titles (e.g. '. [indie playlist]').
+Press Enter with no input when done.
+
+Strip suffix (or Enter to skip): . [indie playlist]
+Strip suffix (or Enter to skip):
+```
+
+Just press Enter immediately to skip suffix stripping and only do the rename/cache sync.
+
+You can also pass suffixes directly as flags:
+
+```bash
+python fix_cache.py /path/to/folder --strip ". [indie playlist]" --strip " (official audio)"
+```
+
+**What it does:**
+- Strips `01 - ` style number prefixes from filenames (legacy format migration)
+- Strips any suffixes you specify from track titles in the cache and filenames on disk
+- If you already manually renamed files on disk, updates the cache to match without touching the files
+- Disambiguates tracks that share the same title by appending the artist name: `Song Title (Artist Name).m4a`
 
 ### Older downloads (no cache file)
 

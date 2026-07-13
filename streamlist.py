@@ -548,12 +548,19 @@ def run_download(args):
     playlist_name = safe_filename(playlist_name)
 
     # ── Album tag overrides ───────────────────────────────────────────────────
-    print(f"\n🏷️  Album tags (press Enter to keep defaults):")
-    album_input  = input(f"   Album name    [{playlist_name}]: ").strip()
-    album_name   = album_input or playlist_name
-    default_album_artist = f"Aey - {album_name}"
-    album_artist_input = input(f"   Album artist  [{default_album_artist}]: ").strip()
-    album_artist = album_artist_input or default_album_artist
+    # --album / --album-artist skip the prompt so callers (e.g. apple_to_ytmusic's
+    # artist mode) can set tags non-interactively.
+    if args.album or args.album_artist:
+        album_name   = args.album or playlist_name
+        album_artist = args.album_artist or f"Aey - {album_name}"
+        print(f"\n🏷️  Album tags: name={album_name!r}, artist={album_artist!r}")
+    else:
+        print(f"\n🏷️  Album tags (press Enter to keep defaults):")
+        album_input  = input(f"   Album name    [{playlist_name}]: ").strip()
+        album_name   = album_input or playlist_name
+        default_album_artist = f"Aey - {album_name}"
+        album_artist_input = input(f"   Album artist  [{default_album_artist}]: ").strip()
+        album_artist = album_artist_input or default_album_artist
 
     # ── Cover art style ───────────────────────────────────────────────────────
     print("\n🖼️  Cover art style for non-square thumbnails:")
@@ -861,6 +868,8 @@ def main():
     parser.add_argument('--url',             help='YouTube playlist or video URL')
     parser.add_argument('--excel',           help='Path to Excel file (.xlsx) with url/title/artist columns')
     parser.add_argument('--name',            help='Playlist / album name')
+    parser.add_argument('--album',           help='Album name tag (skips the interactive album-tag prompt)')
+    parser.add_argument('--album-artist',    help='Album artist tag (skips the interactive album-tag prompt)')
     parser.add_argument('--out',             help='Output directory (default: current directory)')
     parser.add_argument('--browser',         help='Browser to load cookies from',
                         choices=['safari', 'chrome', 'firefox', 'edge', 'brave', 'opera'])

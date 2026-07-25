@@ -1,8 +1,12 @@
-# streamlist
+# streamlist — YouTube playlist to tagged M4A library
 
-Download any YouTube playlist or custom song list as high-quality M4A tracks — with embedded album art, metadata tags, and a ready-to-play `.m3u` playlist file.
+**Paste a playlist link. Get a tagged music folder.**  
+*An interactive CLI that pulls YouTube and YouTube Music playlists through yt-dlp and FFmpeg into resumable, cached M4A downloads with embedded album art.*
 
-Works with YouTube, YouTube Music, private playlists, and YouTube Premium content.
+![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)
+![FFmpeg required](https://img.shields.io/badge/FFmpeg-required-orange)
+
+Download any YouTube playlist or custom Excel song list as high-quality M4A tracks — with embedded album art, metadata tags, and a ready-to-play `.m3u` playlist file. Works with YouTube, YouTube Music, private playlists, and YouTube Premium content.
 
 ---
 
@@ -203,15 +207,15 @@ python fix_cache.py /path/to/folder --strip ". [indie playlist]" --strip " (offi
 If a playlist folder already has `.m4a` files but no `streamlist_cache.json` (e.g. downloaded with an older version of streamlist), the cache is automatically rebuilt from the existing filenames before proceeding:
 
 ```
-🔄 No cache found but 28 existing file(s) detected — rebuilding cache from filenames...
-   ✅ Rebuilt cache for 28 track(s).
+No cache found but 28 existing file(s) detected — rebuilding cache from filenames...
+   ✓ Rebuilt cache for 28 track(s).
 ```
 
 ### Summary line
 
 At the end of every run:
 ```
-🎉 Done!  3 downloaded  |  28 skipped  |  1 failed
+✓ Done!  3 downloaded  |  28 skipped  |  1 failed
 ```
 
 ---
@@ -224,7 +228,7 @@ Some tracks in YouTube Music playlists have a separate video ID that YouTube blo
 
 **How to identify them:** the error will be:
 ```
-❌ Failed: ERROR: [youtube] <video_id>: Video unavailable. This video is not available
+✗ Failed: ERROR: [youtube] <video_id>: Video unavailable. This video is not available
 ```
 even after the cookie retry attempt.
 
@@ -286,9 +290,9 @@ streamlist supports Premium-only and private/unlisted playlists by reading cooki
 
 | Platform | Status |
 |----------|--------|
-| macOS | ✅ Full support (hardware encoder on Apple Silicon / Intel) |
-| Linux | ✅ Full support |
-| Windows | ✅ Works (use `chrome` or `firefox` for cookies; Safari not available) |
+| macOS | ✓ Full support (hardware encoder on Apple Silicon / Intel) |
+| Linux | ✓ Full support |
+| Windows | ✓ Works (use `chrome` or `firefox` for cookies; Safari not available) |
 
 ---
 

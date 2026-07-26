@@ -6,6 +6,10 @@
 ![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)
 ![FFmpeg required](https://img.shields.io/badge/FFmpeg-required-orange)
 
+<p align="center">
+  <img src="docs/media/hero.png" alt="streamlist" width="820">
+</p>
+
 Download any YouTube playlist or custom Excel song list as high-quality M4A tracks — with embedded album art, metadata tags, and a ready-to-play `.m3u` playlist file. Works with YouTube, YouTube Music, private playlists, and YouTube Premium content.
 
 ---

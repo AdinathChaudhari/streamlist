@@ -11,3 +11,6 @@ env/
 *.opus
 *.m3u
 .DS_Store
+
+# Private About-image prompt (personal speciality — not published)
+docs/media/ABOUT-IMAGE.md

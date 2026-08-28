@@ -1,3 +1,23 @@
+<!--
+GitHub metadata — authored here, applied in repo Settings (NOT rendered on the page):
+
+About:  Download YouTube & YouTube Music playlists (or an Excel list) as
+        tagged M4A tracks with album art & .m3u playlists — an interactive
+        CLI with resumable caching and Premium/private cookie access, on
+        yt-dlp and FFmpeg.
+
+Topics (ranked): youtube-playlist, youtube-music, music-downloader,
+                 playlist-downloader, m4a, album-art, metadata-tags,
+                 m3u-playlist, resumable-download, offline-music,
+                 music-library, yt-dlp, ffmpeg, python, cli, macos
+
+Social preview: docs/media/hero.png is the 1536x1024 source; the card is
+  derived, never committed —
+    python Tools/image_compress.py docs/media/hero.png 1MB --glass
+  then upload docs/media/hero-glass.jpg in Settings > Social preview.
+  See GitHub/docs/image-processing.md.
+-->
+
 # streamlist — YouTube playlist to tagged M4A library
 
 **Paste a playlist link. Get a tagged music folder.**  
